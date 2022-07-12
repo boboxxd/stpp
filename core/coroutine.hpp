@@ -7,7 +7,7 @@
 #include <chrono>
 #include <tuple>
 #include <functional>
-
+#include "core/logging.hpp"
 namespace st {
 	static bool enable_coroutine() {
 		if (st_init() < 0) {
@@ -59,11 +59,16 @@ namespace st {
 
 		coroutine(const coroutine&) = delete;
 
-		coroutine(const coroutine&&) = delete;
+		coroutine(const coroutine&&) noexcept;
 
 		coroutine(coroutine&& __t) noexcept
 		{
 			swap(__t);
+		}
+
+		coroutine& operator=(coroutine&& _Other) noexcept {
+			std::swap(_M_id, _Other._M_id);
+			return *this;
 		}
 
 		template< typename _Callable, typename... _Args >
@@ -78,15 +83,18 @@ namespace st {
 				int r0 = st_thread_join(_M_id._M_coroutine, &res);
 				if (r0) {
 					// By st_thread_join
-					if (errno == EINVAL) assert(!r0);
-					if (errno == EDEADLK) assert(!r0);
+					if (errno == EINVAL) {LOG(TRACE) << "1";assert(!r0);}
+					if (errno == EDEADLK) { LOG(TRACE) << "1"; assert(!r0);}
 					// By st_cond_timedwait
-					if (errno == EINTR) assert(!r0);
-					if (errno == ETIME) assert(!r0);
+					if (errno == EINTR) { LOG(TRACE) << "1"; assert(!r0);}
+					if (errno == ETIME) { LOG(TRACE) << "1"; assert(!r0);}
 					// Others
 					assert(!r0);
 				}
+				//st_thread_exit(NULL);
 			}
+			
+			_M_id._M_coroutine = nullptr;
 		}
 
 		coroutine& operator=(const coroutine&) = delete;
@@ -203,10 +211,13 @@ namespace st {
 			st_usleep(__mms.count());
 		}
 
-		long get_id() {
+		inline long get_id() {
 			return reinterpret_cast<long>(st_thread_self());
 		}
-		
+
+		inline void yield() {
+			st_thread_yield();
+		}
 	}
 
 	class mutex {

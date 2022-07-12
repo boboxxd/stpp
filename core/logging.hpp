@@ -1,12 +1,17 @@
 #pragma once
 #include <chrono>
 #include <iomanip>
+#include <iostream>
 #include <cstring>
 #include "coroutine.hpp"
 #define __FILENAME__ (strrchr(__FILE__, '/') ? (strrchr(__FILE__, '/') + 1):__FILE__)
-enum {INFO,WARNNING,ERROR};
+enum {TRACE,INFO,WARNNING,ERROR};
 
 namespace st{
+    namespace this_coroutine {
+        long get_id();
+    }
+
     static std::string GetCurrentTimeStamp()
     {
         std::chrono::system_clock::time_point now = std::chrono::system_clock::now();
@@ -30,6 +35,9 @@ namespace st{
             LogStream(std::ostream& stream,int level ,const char* file,int line):os(stream){
                 std::string lestr;
                 switch(level){
+                    case TRACE:
+                        lestr = "TRACE";
+                    break;
                     case INFO:
                         lestr ="INFO";
                     break;
@@ -50,4 +58,3 @@ namespace st{
 }
 
 #define LOG(level) st::LogStream(std::cout,level,__FILENAME__,__LINE__).os
-

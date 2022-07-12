@@ -69,6 +69,7 @@ int main() {
 		while (!quit) {
 			LOG(INFO) << "coroutine id:" << st::this_coroutine::get_id();
 			auto stat = cvar.wait_for(std::chrono::seconds(1));
+			//st::this_coroutine::yield();
 		}
 		}));
 	return 0;
