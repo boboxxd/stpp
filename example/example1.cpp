@@ -1,6 +1,6 @@
 #include <signal.h>
 #include <vector>
-#include "coroutine.hpp"
+#include "core/coroutine.hpp"
 #include <ostream>
 #include <sstream>
 #include <iostream>
@@ -8,7 +8,7 @@
 #define ENABLE_SIMPLE_GLOG 1
 
 #if(ENABLE_SIMPLE_GLOG)
-#include "logging.hpp"
+#include "core/logging.hpp"
 #endif
 
 st::condition_variable cvar;
