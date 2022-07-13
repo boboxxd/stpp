@@ -16,7 +16,7 @@
 #include "core/error.hpp"
 #include <netinet/in.h>
 #include <sys/types.h>
-#include<arpa/inet.h>
+#include <arpa/inet.h>
 #include <vector>
 
 #define ST_UTIME_NO_TIMEOUT ((st_utime_t) -1LL)

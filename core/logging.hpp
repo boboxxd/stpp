@@ -3,6 +3,7 @@
 #include <iomanip>
 #include <iostream>
 #include <cstring>
+#include <sstream>
 #include "coroutine.hpp"
 #define __FILENAME__ (strrchr(__FILE__, '/') ? (strrchr(__FILE__, '/') + 1):__FILE__)
 enum {TRACE,INFO,WARNNING,ERROR};
@@ -22,10 +23,10 @@ namespace st{
         char buffer[128];
         strftime(buffer, sizeof(buffer), "%F %T", now_tm);
 
-        std::ostringstream ss;
+        std::stringstream ss;
         ss.fill('0');
         auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()) % 1000000000;
-        ss << buffer << "." <<std::setw(8)<<std::setfill('0')<<setiosflags(std::ios::right)<<ns.count();
+        ss << buffer << "." <<std::setw(8)<<std::setfill('0')<<std::setiosflags(std::ios::right)<<ns.count();
         return ss.str();
     }
 
