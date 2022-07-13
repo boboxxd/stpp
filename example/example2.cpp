@@ -18,15 +18,13 @@
 #include <sys/types.h>
 #include <arpa/inet.h>
 #include <vector>
-
-#define ST_UTIME_NO_TIMEOUT ((st_utime_t) -1LL)
-#define SERVER_LISTEN_BACKLOG 512
-
+#include "core/error.hpp"
+#include "core/net.hpp"
 class Accpector {
 public:
 	Accpector(const char* host, int port):host_(host),port_(port) {}
 
-	 st::ErrorPtr init() {
+	 st::error_t init() {
 			char sport[8];
 			snprintf(sport, sizeof(sport), "%d", port_);
 			addrinfo hints;
@@ -37,57 +35,51 @@ public:
 	
 			addrinfo* r = NULL;
 			if (getaddrinfo(host_.c_str(), sport, (const addrinfo*)&hints, &r)) {
-				return MAKE_ERROR(st::ErrorCode::INNER_ERROR, "getaddrinfo error");
+				return error_new(ERROR_INNER, "getaddrinfo error");
 			}
 	
 			int fd = 0;
 			if ((fd = socket(r->ai_family, r->ai_socktype, r->ai_protocol)) == -1) {
-				LOG(TRACE) << "socket error";
-				return MAKE_ERROR(st::ErrorCode::INNER_ERROR,"socket error");
+				return error_new(ERROR_INNER,"socket error");
 			}
 			int v = 1;
 			if (setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &v, sizeof(int)) == -1) {
-				LOG(TRACE) << "setsockopt SO_REUSEPORT error";
-				return MAKE_ERROR(st::ErrorCode::INNER_ERROR, "setsockopt SO_REUSEPORT error");
+				return error_new(ERROR_INNER, "setsockopt SO_REUSEPORT error");
 			}
 	
 			v = 1;
 			if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &v, sizeof(int)) == -1) {
-				LOG(TRACE) << "setsockopt SO_REUSEADDR error";
-				return MAKE_ERROR(st::ErrorCode::INNER_ERROR, "setsockopt SO_REUSEADDR error");
+				return error_new(ERROR_INNER, "setsockopt SO_REUSEADDR error");
 			}
 	
 			int flags = fcntl(fd, F_GETFD);
 			flags |= FD_CLOEXEC;
 			if (fcntl(fd, F_SETFD, flags) == -1) {
-				LOG(TRACE) << "setsockopt FD_CLOEXEC error";
-				return MAKE_ERROR(st::ErrorCode::INNER_ERROR, "setsockopt FD_CLOEXEC error");
+				return error_new(ERROR_INNER, "setsockopt FD_CLOEXEC error");
 			}
 	
 			if (::bind(fd, r->ai_addr, r->ai_addrlen) == -1) {
-				LOG(TRACE) << "bind error";
-				return MAKE_ERROR(st::ErrorCode::INNER_ERROR, "bind error");
+				return error_new(ERROR_INNER, "bind error");
 	
 			}
 	
 			if (::listen(fd, SERVER_LISTEN_BACKLOG) == -1) {
-				LOG(TRACE) << "listen error";
-				return MAKE_ERROR(st::ErrorCode::INNER_ERROR, "listen error");
+				return error_new(ERROR_INNER, "listen error");
 	
 			}
 			if ((listenfd_ = st_netfd_open_socket(fd)) == NULL) {
-				LOG(TRACE) << "st_netfd_open_socket error";
-				return MAKE_ERROR(st::ErrorCode::INNER_ERROR, "st_netfd_open_socket error");
+				return error_new(ERROR_INNER, "st_netfd_open_socket error");
 	
 			}
-			return NoError;
+			return error_ok;
 	}
 
-	 st_netfd_t toAccept(struct sockaddr* addr, int* addrlen) {
+	 st::netfd_t toAccept(struct sockaddr* addr, int* addrlen) {
 		return st_accept(listenfd_, addr, addrlen, ST_UTIME_NO_TIMEOUT);
 	 }
+
 private:
-	st_netfd_t  listenfd_;
+	st::netfd_t  listenfd_;
 	std::string host_;
 	int port_;
 };
@@ -108,9 +100,9 @@ public:
 
 	size_t count() const { return sesses.size(); }
 
-	st::ErrorPtr start() {
+	st::error_t start() {
 		co_ = st::coroutine(&::SessionManagerImpl<ConnPtr>::run, this);
-		return NoError;
+		return error_ok;
 	}
 
 private:
@@ -134,7 +126,7 @@ using SessionManager = SessionManagerImpl<TcpConnectionPtr>;
 
 class TcpConnection:public std::enable_shared_from_this<TcpConnection> {
 public:
-	TcpConnection(st_netfd_t fd, SessionManager* mgr) :fd_(fd),mgr_(mgr) {
+	TcpConnection(st::netfd_t fd, SessionManager* mgr) :fd_(fd),mgr_(mgr) {
 		
 	}
 
@@ -144,10 +136,10 @@ public:
 		LOG(TRACE) << "~TcpConnection";
 	}
 
-	st::ErrorPtr start() {
+	st::error_t start() {
 		mgr_->addConn(shared_from_this());
 		co_ = st::coroutine(&::TcpConnection::run, this);
-		return NoError;
+		return error_ok;
 	}
 private:
 	void run() {
@@ -171,10 +163,9 @@ private:
 		LOG(TRACE) << "TcpConnection run exit!";
 		mgr_->removeConn(shared_from_this());
 	}
-
 private:
 	bool exit_ = false;
-	st_netfd_t fd_;
+	st::netfd_t fd_;
 	SessionManager* mgr_;
 	st::coroutine co_;
 };
@@ -182,15 +173,19 @@ private:
 
 int main() {
 	st::enable_coroutine();
+	st::LogStream::setLogLevel(TRACE);
 
+	//st::error_t e = error_new(ERROR_INNER, "this is an error!");
+	
 	SessionManager mgr;
 	mgr.start();
 
 	Accpector acceptor("0.0.0.0",33333);
 	auto err = acceptor.init();
-	if (err)
+	if (err && err->code() != ERROR_OK) {
+		LOG(ERROR) << err->what();
 		return -1;
-
+	}
 	st::coroutine t([&acceptor,&mgr]() {
 		while(1){
 			auto cli = acceptor.toAccept(NULL, NULL);
@@ -205,7 +200,11 @@ int main() {
 	});
 
 	LOG(INFO) << "main ";
-	
+
+	std::thread t2([]() {
+	LOG(INFO) << "t2 = ";
+	});
+	t2.join();
 	while (1) {
 		LOG(INFO) << "conn count = " << mgr.count();
 		st::this_coroutine::sleep_for(std::chrono::seconds(5));

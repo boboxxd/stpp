@@ -4,15 +4,22 @@
 #include <iostream>
 #include <cstring>
 #include <sstream>
-#include "coroutine.hpp"
+#include <thread>
+#define ENABLE_ST_COROUTINE
+
+#ifdef ENABLE_ST_COROUTINE
+    #include "coroutine.hpp"
+    namespace st {
+        namespace this_coroutine {
+            long get_id();
+        }
+    }
+#endif
+
 #define __FILENAME__ (strrchr(__FILE__, '/') ? (strrchr(__FILE__, '/') + 1):__FILE__)
 enum {TRACE,INFO,WARNNING,ERROR};
 
 namespace st{
-    namespace this_coroutine {
-        long get_id();
-    }
-
     static std::string GetCurrentTimeStamp()
     {
         std::chrono::system_clock::time_point now = std::chrono::system_clock::now();
@@ -21,7 +28,8 @@ namespace st{
         std::tm* now_tm = std::localtime(&now_time_t);
 
         char buffer[128];
-        strftime(buffer, sizeof(buffer), "%F %T", now_tm);
+        //Date:\n%Y-%m-%d\nTime:\n%I:%M:%S\n"
+        strftime(buffer, sizeof(buffer), "%Y%m%d %H:%M:%S", now_tm);
 
         std::stringstream ss;
         ss.fill('0');
@@ -33,29 +41,49 @@ namespace st{
 
     class LogStream{
         public:
-            LogStream(std::ostream& stream,int level ,const char* file,int line):os(stream){
+            LogStream(std::ostream& stream,int level ,const char* file,int line):os(stream), _level(level){
+                if (level < __log_level_limit)
+                    return;
                 std::string lestr;
                 switch(level){
                     case TRACE:
-                        lestr = "TRACE";
+                        lestr = "T";
                     break;
                     case INFO:
-                        lestr ="INFO";
+                        lestr ="I";
                     break;
                     case WARNNING:
-                        lestr ="WARNNING";
+                        lestr ="W";
                     break;
                     case ERROR:
-                        lestr ="ERROR";
+                        lestr ="E";
                     break;
                 }
-                os <<lestr<<" "<<GetCurrentTimeStamp()<<"|"<<st::this_coroutine::get_id()<<"|"<< file<<":"<<line<<"|> ";
+
+#ifdef ENABLE_ST_COROUTINE
+                ss << lestr  << GetCurrentTimeStamp() << " " << std::this_thread::get_id() << " " << st::this_coroutine::get_id() <<" " << file << ":" << line << "] ";
+#else
+                ss << lestr  << GetCurrentTimeStamp() << " " << std::this_thread::get_id() << " " << file << ":" << line << "] ";
+#endif
             }
+
             ~LogStream(){
-                os <<'\n';
+                if (_level < __log_level_limit)
+                    return;
+                ss <<'\n';
+                os << ss.str();
             }
+
+            static void setLogLevel(int level) { LogStream::__log_level_limit = level; }
+
             std::ostream& os;
+            std::stringstream ss;
+    private:
+        static int __log_level_limit;
+        int _level;
     };
+
+    int LogStream::__log_level_limit = INFO;
 }
 
-#define LOG(level) st::LogStream(std::cout,level,__FILENAME__,__LINE__).os
+#define LOG(level) st::LogStream(std::cout,level,__FILENAME__,__LINE__).ss
