@@ -1,4 +1,5 @@
 #pragma once
+
 #define ERROR_SUCCESS                       0
 #define ERROR_SOCKET_CREATE                 1000
 #define ERROR_SOCKET_SETREUSE               1001
