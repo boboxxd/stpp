@@ -20,34 +20,36 @@ void sig_handler(int sigNo) {
 	cvar.notify_all();
 }
 
-const int num = 10000;
+namespace Test {
+	static const int num = 10000;
 
-void testThread() {
-	std::vector<std::thread> v;
+	void testThread() {
+		std::vector<std::thread> v;
 
-	for (int i = 0; i < num; i++) {
-		v.emplace_back([]() {
-			for (;;) {
-				LOG(INFO) << "thread";
-				std::this_thread::sleep_for(std::chrono::milliseconds(10));
-			}
-		});
+		for (int i = 0; i < num; i++) {
+			v.emplace_back([]() {
+				for (;;) {
+					LOG(INFO) << "thread";
+					std::this_thread::sleep_for(std::chrono::milliseconds(10));
+				}
+			});
+		}
+		for (auto& it : v) {
+			it.join();
+		}
 	}
-	for (auto& it : v) {
-		it.join();
-	}
-}
 
-void testCoroutine() {
-	std::vector<st::coroutine> v;
+	void testCoroutine() {
+		std::vector<st::coroutine> v;
 
-	for (int i = 0; i < num; i++) {
-		v.emplace_back([]() {
-			for (;;) {
-				LOG(INFO) << "coroutine";
-				st::this_coroutine::sleep_for(std::chrono::milliseconds(10));
-			}
-		});
+		for (int i = 0; i < num; i++) {
+			v.emplace_back([]() {
+				for (;;) {
+					LOG(INFO) << "coroutine";
+					st::this_coroutine::sleep_for(std::chrono::milliseconds(10));
+				}
+			});
+		}
 	}
 }
 
@@ -105,8 +107,8 @@ int main(int argc ,char** argv) {
 	//	}
 	//	});
 	if(argc == 1)
-		testThread();
+		Test::testThread();
 	else
-		testCoroutine();
+		Test::testCoroutine();
 	return 0;
 }
