@@ -19,9 +19,6 @@ namespace st{
 
 	#define UTIME_NO_TIMEOUT ((st::utime_t) -1LL)
 	#define SERVER_LISTEN_BACKLOG 512
-	// Time and duration unit, in us.
-	typedef int64_t srs_utime_t;
-
 	// The time unit in ms, for example 100 * SRS_UTIME_MILLISECONDS means 100ms.
 	#define UTIME_MILLISECONDS 1000
 
@@ -30,9 +27,9 @@ namespace st{
 	#define u2msi(us) int((us) / UTIME_MILLISECONDS)
 
 	// Them time duration = end - start. return 0, if start or end is 0.
-		srs_utime_t srs_duration(srs_utime_t start, srs_utime_t end);
+	utime_t srs_duration(utime_t start, utime_t end);
 
-		// The time unit in ms, for example 120 * SRS_UTIME_SECONDS means 120s.
+	// The time unit in ms, for example 120 * SRS_UTIME_SECONDS means 120s.
 	#define UTIME_SECONDS 1000000LL
 
 	// The time unit in minutes, for example 3 * SRS_UTIME_MINUTES means 3m.
@@ -280,30 +277,18 @@ namespace st{
 			std::string host_;
 			int port_;
 		};
-
-		//class SocketManager {
-		//public:
-		//	SocketManager() {}
-		//	~SocketManager() {}
-
-		//private:
-		//	std::vector<Socket> conns_;
-		//	TcpServer* svr_;
-		//};
-
 	}
 
 	class Socket
 	{
 	private:
 		// The recv/send timeout in utime_t.
-		// @remark Use ST_UTIME_NO_TIMEOUT for never timeout.
+		// @remark Use UTIME_NO_TIMEOUT for never timeout.
 		utime_t rtm;
 		utime_t stm;
 		// The recv/send data in bytes
 		int64_t rbytes;
 		int64_t sbytes;
-		// The underlayer st fd.
 		netfd_t stfd;
 	public:
 		Socket() {
@@ -317,6 +302,7 @@ namespace st{
 				__detail::close_stfd(stfd);
 			}
 		}
+		
 	public:
 		// Initialize the socket with stfd, user must manage it.
 		virtual error_t initialize(netfd_t fd) { stfd = fd; return error_ok; }
@@ -460,13 +446,70 @@ namespace st{
 			return err;
 		}
 	};
+
 	using SocketPtr = std::shared_ptr<Socket>;
-	using ConnectHandler = std::function<void(SocketPtr)>;
+	using CodecCallback = std::function<void(void* data, size_t len)>;
+	template<typename Server>
+	class TcpConnection;
+	class TcpServer;
+	using TcpConnectionPtr = std::shared_ptr<TcpConnection<TcpServer>>;
+	using TcpConnectionHandler = std::function<void(TcpConnectionPtr conn)>;
+
+	class IProtoCodec {
+	public:
+		virtual ~IProtoCodec() {}
+		virtual error_t encode(unsigned char* data, size_t len, CodecCallback cbk) = 0;
+		virtual error_t decode(unsigned char* data, size_t len, st::CodecCallback cbk) = 0;
+	};
+	template<typename Server>
+	class TcpConnection:public std::enable_shared_from_this<TcpConnection<Server>> {
+	public:
+		TcpConnection(SocketPtr sock, IProtoCodec* codec, Server* svr):sock_(sock),codec_(codec),svr_(svr) {}
+
+		~TcpConnection() {
+			
+		}
+		
+		error_t read(std::vector<unsigned char>& data ) {
+			error_t err;
+			ssize_t nread = 0;
+			char buf[4096];
+			err = sock_->read(buf, 4096, &nread);
+			err = codec_->decode((unsigned char*)buf, nread, [&](void* vbuf, size_t vlen) {
+				data.assign((unsigned char*)vbuf, (unsigned char*)vbuf + vlen);
+			});
+			return err;
+		}
+
+		error_t write(void* buf, size_t size) {
+			error_t err;
+			err = codec_->encode((unsigned char*)buf, size, [&](void* buf, size_t len) {
+				ssize_t nwrite = 0;
+				err = sock_->write(buf, size, &nwrite);	
+			});
+			return err;
+		}
+
+		void onNewConnection(TcpConnectionHandler handler) {
+			LOG(TRACE) << "accept new client...";
+			co_ = st::coroutine([this](TcpConnectionHandler handler) {
+				handler(this->shared_from_this());
+				LOG(TRACE) << "done";
+				svr_->removeConnecttion(this->shared_from_this());
+			},handler);
+		}
+
+	protected:
+		SocketPtr sock_;
+		st::coroutine co_;
+		IProtoCodec* codec_;
+		Server* svr_;
+	};
+
 	class TcpServer {
 	public:
+		friend TcpConnection<TcpServer>;
 		TcpServer(const char* host, int port):acceptor_(host,port) {}
-
-		void setConnectHandler(ConnectHandler&& handler) { handler_ = std::move(handler); }
 
 		error_t start() {
 			error_t err;
@@ -475,12 +518,18 @@ namespace st{
 				return error_trace(err);
 			}
 			co_ = st::coroutine(&TcpServer::run,this);
+			idolco_ = st::coroutine(&TcpServer::idol, this);
 			return error_ok;
 		}
 
 		void stop() {
 			exit_ = true;
 			co_.terminate();
+		}
+
+		void onNewConnection(IProtoCodec* codec, TcpConnectionHandler handler) {
+			codec_ = codec;
+			handler_ = std::move(handler);
 		}
 
 	private:
@@ -490,7 +539,7 @@ namespace st{
 				if (nfd == nullptr) {
 					continue;
 				}
-				LOG(INFO) << "accept new client...";
+				
 				auto sock = SocketPtr(new Socket());
 				auto err = sock->initialize(nfd);
 				if (err) {
@@ -498,18 +547,36 @@ namespace st{
 					continue;
 				}
 
-				clientcos_.emplace_back([this, sock]() {
-					handler_(sock);
-				});
+				addConnection(TcpConnectionPtr(new TcpConnection<TcpServer>(sock, codec_,this)));
+			}
+		}
+
+		void idol() {
+			while (!exit_) {
+				LOG(TRACE) << "release connection num:" << closed_cliconns_.size();
+				closed_cliconns_.clear();
+				st::this_coroutine::sleep_for(std::chrono::seconds(2));
 			}
 		}
 	private:
+		void removeConnecttion(TcpConnectionPtr conn) {
+			closed_cliconns_.push_back(conn);
+			alive_cliconns_.erase(std::find(alive_cliconns_.begin(),alive_cliconns_.end(),conn));
+		}
+
+		void addConnection(TcpConnectionPtr conn) {
+			conn->onNewConnection(handler_);
+			alive_cliconns_.push_back(conn);
+		}
 
 	private:
 		__detail::accpector acceptor_;
-		st::coroutine co_;
+		st::coroutine co_;					 //accept–≠≥Ã
+		st::coroutine idolco_;				
 		bool exit_ = false;
-		ConnectHandler handler_;
-		std::vector<st::coroutine> clientcos_;
+		IProtoCodec* codec_;
+		TcpConnectionHandler handler_;
+		std::vector<TcpConnectionPtr> alive_cliconns_; //client co
+		std::vector<TcpConnectionPtr> closed_cliconns_;
 	};
 }

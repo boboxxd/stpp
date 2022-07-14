@@ -13,42 +13,48 @@ void sig_handler(int signo) {
 	stopcon.notify_all();
 }
 
+class MyCodec :public st::IProtoCodec {
+public:
+	virtual st::error_t encode(unsigned char* data, size_t len, st::CodecCallback cbk) override{
+		cbk(data, len);
+		LOG(INFO) << "encoded";
+		return error_ok;
+	}
+
+	virtual st::error_t decode(unsigned char* data, size_t len, st::CodecCallback cbk) override {
+		cbk(data,len);
+		LOG(INFO) << "decode";
+		return error_ok;
+	}
+};
+
 int main() {
 	signal(SIGINT, sig_handler);
 	st::enable_coroutine();
 	st::LogStream::setLogLevel(TRACE);
-
-	st::TcpServer svr("0.0.0.0", 33332);
-
-	svr.setConnectHandler([](st::SocketPtr sock) {
-		LOG(INFO) << "setConnectHandler";
-		char buf[4096];
-		ssize_t readn = 0;
-		ssize_t writen = 0;
-		auto err = sock->read(buf,4096,&readn);
-		if (err) {
-			LOG(ERROR) << err->what();
-		}
-		else {
-			LOG(INFO) << "has read:" << sock->get_recv_bytes() << " bytes.";
-			LOG(INFO) << "read data:" << std::string(buf);
-			err = sock->write((void*)"yes", 4, &writen);
-			if (err) {
-				LOG(ERROR) << err->what();
-			}
-			else {
-				LOG(INFO) << "has write:" << sock->get_send_bytes()<<" bytes.";
-			}
-		}
-	});
-
+	int port = 33332;
+	st::TcpServer svr("0.0.0.0", port);
 	auto err = svr.start();
 	if (err) {
 		LOG(ERROR) << err->what();
 		return -1;
 	}
+	LOG(INFO) << "server listen on: " << port;
+	
+	svr.onNewConnection(new MyCodec(), [](st::TcpConnectionPtr conn) {
+		std::vector<unsigned char> recvbuf;
+		conn->read(recvbuf);
+		LOG(INFO) << std::string((char*)recvbuf.data());
+
+		std::stringstream ss;
+		ss << "HTTP/1.1 200 OK" << "\r\n";
+		ss << "\r\n";
+		conn->write((void*)ss.str().data(), ss.str().size());
+		LOG(INFO) << "send response";
+	});
 
 	stopcon.wait();
+
 	svr.stop();
 	LOG(INFO) << "program exit normally ...";
 	return 0;

@@ -150,7 +150,7 @@ namespace st {
 		static void* execute_native_coroutine_routine(void* __p)
 		{
 			coroutine::_State_ptr __t{ static_cast<coroutine::_State*>(__p) };
-			__t->_M_run();		// 运行线程入口函数
+			__t->_M_run();
 			return nullptr;
 		}
 
