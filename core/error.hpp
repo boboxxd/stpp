@@ -13,16 +13,16 @@
 #endif
 
 namespace st {
-	class __error;
-	typedef std::shared_ptr<__error> error_t;
+	class __merror;
+	typedef std::shared_ptr<__merror> error_t;
 
-	class __error{
+	class __merror{
 	public:
-		~__error() { stacks_.clear(); }
-		__error(const __error&) = delete;
-		__error(__error&&) = delete;
-		__error& operator=(const __error&) = delete;
-		__error& operator=(__error&&) = delete;
+		~__merror() { stacks_.clear(); }
+		__merror(const __merror&) = delete;
+		__merror(__merror&&) = delete;
+		__merror& operator=(const __merror&) = delete;
+		__merror& operator=(__merror&&) = delete;
 
 		static error_t make_ok() {
 			return error_t(nullptr);
@@ -34,7 +34,7 @@ namespace st {
 			static char buffer[4096];
 			vsnprintf(buffer, sizeof(buffer), fmt, ap);
 			va_end(ap);
-			return error_t(new __error(file, line, fun, code, std::string(buffer)));
+			return error_t(new __merror(file, line, fun, code, std::string(buffer)));
 		}
 
 		static error_t append(error_t err, const std::string& file, int line, const std::string& fun) {
@@ -67,8 +67,8 @@ namespace st {
 		}
 
 	private:
-		__error() = default;
-		__error(const std::string& file, int line, const std::string& fun,int codec, const std::string& desc) {
+		__merror() = default;
+		__merror(const std::string& file, int line, const std::string& fun,int codec, const std::string& desc) {
 			rerrno_ = (int)errno;
 			code_ = codec;
 			desc_ = desc;
@@ -79,21 +79,21 @@ namespace st {
 			stacks_.emplace_back(file,line,fun);
 		}
 	private:
-		struct __erroritem {
+		struct __merroritem {
 			std::string file;
 			int         line;
 			std::string fun;
-			__erroritem(const std::string& filev, int linev, const std::string& funv):file(filev),line(linev),fun(funv) {}
+			__merroritem(const std::string& filev, int linev, const std::string& funv):file(filev),line(linev),fun(funv) {}
 		};
 
 		int code_;
 		int rerrno_;
 		std::string desc_;
-		std::vector<__erroritem> stacks_;
+		std::vector<__merroritem> stacks_;
 	};
 
 }
 
-#define error_new(code, fmt, ...) st::__error::make_error(__FILENAME__, __LINE__, __FUNCTION__, code, fmt, ##__VA_ARGS__)
-#define error_trace(err) st::__error::append(err,__FILENAME__, __LINE__, __FUNCTION__)
-#define error_ok st::__error::make_ok() 
+#define error_new(code, fmt, ...) st::__merror::make_error(__FILENAME__, __LINE__, __FUNCTION__, code, fmt, ##__VA_ARGS__)
+#define error_trace(err) st::__merror::append(err,__FILENAME__, __LINE__, __FUNCTION__)
+#define error_ok st::__merror::make_ok() 

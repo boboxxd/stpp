@@ -524,6 +524,7 @@ namespace st{
 
 		void stop() {
 			exit_ = true;
+			clear_cond_.notify_all();
 			co_.terminate();
 		}
 
@@ -551,17 +552,19 @@ namespace st{
 			}
 		}
 
+		//clear connection
 		void idol() {
 			while (!exit_) {
+				clear_cond_.wait();
 				LOG(TRACE) << "release connection num:" << closed_cliconns_.size();
 				closed_cliconns_.clear();
-				st::this_coroutine::sleep_for(std::chrono::seconds(2));
 			}
 		}
 	private:
 		void removeConnecttion(TcpConnectionPtr conn) {
 			closed_cliconns_.push_back(conn);
 			alive_cliconns_.erase(std::find(alive_cliconns_.begin(),alive_cliconns_.end(),conn));
+			clear_cond_.notify_one();
 		}
 
 		void addConnection(TcpConnectionPtr conn) {
@@ -571,12 +574,13 @@ namespace st{
 
 	private:
 		__detail::accpector acceptor_;
-		st::coroutine co_;					 //acceptÐ­³Ì
+		st::coroutine co_;					 //acceptÐ­ï¿½ï¿½
 		st::coroutine idolco_;				
 		bool exit_ = false;
 		IProtoCodec* codec_;
 		TcpConnectionHandler handler_;
 		std::vector<TcpConnectionPtr> alive_cliconns_; //client co
 		std::vector<TcpConnectionPtr> closed_cliconns_;
+		st::condition_variable clear_cond_;
 	};
 }
