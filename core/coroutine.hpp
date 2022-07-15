@@ -91,9 +91,7 @@ namespace st {
 					// Others
 					assert(!r0);
 				}
-				//st_thread_exit(NULL);
 			}
-			
 			_M_id._M_coroutine = nullptr;
 		}
 

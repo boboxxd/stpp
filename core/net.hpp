@@ -12,50 +12,49 @@
 #include "error.hpp"
 #include "autofree.hpp"
 
-
-namespace st{
+namespace st {
 	typedef st_netfd_t netfd_t;
 	typedef int64_t utime_t;
 
-	#define UTIME_NO_TIMEOUT ((st::utime_t) -1LL)
-	#define SERVER_LISTEN_BACKLOG 512
+#define UTIME_NO_TIMEOUT ((st::utime_t) -1LL)
+#define SERVER_LISTEN_BACKLOG 512
 	// The time unit in ms, for example 100 * SRS_UTIME_MILLISECONDS means 100ms.
-	#define UTIME_MILLISECONDS 1000
+#define UTIME_MILLISECONDS 1000
 
-	// Convert srs_utime_t as ms.
-	#define u2ms(us) ((us) / UTIME_MILLISECONDS)
-	#define u2msi(us) int((us) / UTIME_MILLISECONDS)
+// Convert srs_utime_t as ms.
+#define u2ms(us) ((us) / UTIME_MILLISECONDS)
+#define u2msi(us) int((us) / UTIME_MILLISECONDS)
 
-	// Them time duration = end - start. return 0, if start or end is 0.
+// Them time duration = end - start. return 0, if start or end is 0.
 	utime_t srs_duration(utime_t start, utime_t end);
 
 	// The time unit in ms, for example 120 * SRS_UTIME_SECONDS means 120s.
-	#define UTIME_SECONDS 1000000LL
+#define UTIME_SECONDS 1000000LL
 
-	// The time unit in minutes, for example 3 * SRS_UTIME_MINUTES means 3m.
-	#define UTIME_MINUTES 60000000LL
+// The time unit in minutes, for example 3 * SRS_UTIME_MINUTES means 3m.
+#define UTIME_MINUTES 60000000LL
 
-	// The time unit in hours, for example 2 * SRS_UTIME_HOURS means 2h.
-	#define UTIME_HOURS 3600000000LL
+// The time unit in hours, for example 2 * SRS_UTIME_HOURS means 2h.
+#define UTIME_HOURS 3600000000LL
 
 	namespace __detail {
 		static void close_stfd(netfd_t& stfd) {
-		if (stfd) {
-			// we must ensure the close is ok.
-			int r0 = st_netfd_close(stfd);
-			if (r0) {
-				// By _st_epoll_fd_close or _st_kq_fd_close
-				if (errno == EBUSY) assert(!r0);
-				// By close
-				if (errno == EBADF) assert(!r0);
-				if (errno == EINTR) assert(!r0);
-				if (errno == EIO)   assert(!r0);
-				// Others
-				assert(!r0);
+			if (stfd) {
+				// we must ensure the close is ok.
+				int r0 = st_netfd_close(stfd);
+				if (r0) {
+					// By _st_epoll_fd_close or _st_kq_fd_close
+					if (errno == EBUSY) assert(!r0);
+					// By close
+					if (errno == EBADF) assert(!r0);
+					if (errno == EINTR) assert(!r0);
+					if (errno == EIO)   assert(!r0);
+					// Others
+					assert(!r0);
+				}
+				stfd = NULL;
 			}
-			stfd = NULL;
 		}
-	}
 
 		static error_t fd_closeexec(int fd) {
 			int flags = fcntl(fd, F_GETFD);
@@ -136,7 +135,7 @@ namespace st{
 
 		static error_t do_tcp_listen(int fd, addrinfo* r, netfd_t* pfd)
 		{
-			error_t err ;
+			error_t err;
 			// Detect alive for TCP connection.
 			// @see https://github.com/ossrs/srs/issues/1044
 			if ((err = fd_keepalive(fd)) != error_ok) {
@@ -185,12 +184,12 @@ namespace st{
 			addrinfo* r = NULL;
 			SrsAutoFreeH(addrinfo, r, freeaddrinfo);
 			if (getaddrinfo(ip.c_str(), sport, (const addrinfo*)&hints, &r)) {
-				return error_new(ERROR_SYSTEM_IP_INVALID, "getaddrinfo hints=(%d,%d,%d)",hints.ai_family, hints.ai_socktype, hints.ai_flags);
+				return error_new(ERROR_SYSTEM_IP_INVALID, "getaddrinfo hints=(%d,%d,%d)", hints.ai_family, hints.ai_socktype, hints.ai_flags);
 			}
 
 			int fd = 0;
 			if ((fd = ::socket(r->ai_family, r->ai_socktype, r->ai_protocol)) == -1) {
-				return error_new(ERROR_SOCKET_CREATE, "socket domain=%d, type=%d, protocol=%d",r->ai_family, r->ai_socktype, r->ai_protocol);
+				return error_new(ERROR_SOCKET_CREATE, "socket domain=%d, type=%d, protocol=%d", r->ai_family, r->ai_socktype, r->ai_protocol);
 			}
 
 			if ((err = do_tcp_listen(fd, r, pfd)) != error_ok) {
@@ -302,7 +301,7 @@ namespace st{
 				__detail::close_stfd(stfd);
 			}
 		}
-		
+
 	public:
 		// Initialize the socket with stfd, user must manage it.
 		virtual error_t initialize(netfd_t fd) { stfd = fd; return error_ok; }
@@ -316,7 +315,7 @@ namespace st{
 	public:
 		// @param nread, the actual read bytes, ignore if NULL.
 		virtual error_t read(void* buf, size_t size, ssize_t* nread) {
-			error_t err ;
+			error_t err;
 
 			ssize_t nb_read;
 			if (rtm == UTIME_NO_TIMEOUT) {
@@ -448,7 +447,7 @@ namespace st{
 	};
 
 	using SocketPtr = std::shared_ptr<Socket>;
-	using CodecCallback = std::function<void(void* data, size_t len)>;
+	using CodecCallback = std::function<void(std::vector<unsigned char>&&)>;
 	template<typename Server>
 	class TcpConnection;
 	class TcpServer;
@@ -462,41 +461,38 @@ namespace st{
 		virtual error_t decode(unsigned char* data, size_t len, st::CodecCallback cbk) = 0;
 	};
 	template<typename Server>
-	class TcpConnection:public std::enable_shared_from_this<TcpConnection<Server>> {
+	class TcpConnection :public std::enable_shared_from_this<TcpConnection<Server>> {
 	public:
-		TcpConnection(SocketPtr sock, IProtoCodec* codec, Server* svr):sock_(sock),codec_(codec),svr_(svr) {}
+		TcpConnection(SocketPtr sock, IProtoCodec* codec, Server* svr) :sock_(sock), codec_(codec), svr_(svr) {}
 
 		~TcpConnection() {
-			
 		}
-		
-		error_t read(std::vector<unsigned char>& data ) {
+
+		error_t read(std::vector<unsigned char>& data) {
 			error_t err;
 			ssize_t nread = 0;
 			char buf[4096];
 			err = sock_->read(buf, 4096, &nread);
-			err = codec_->decode((unsigned char*)buf, nread, [&](void* vbuf, size_t vlen) {
-				data.assign((unsigned char*)vbuf, (unsigned char*)vbuf + vlen);
-			});
+			err = codec_->decode((unsigned char*)buf, nread, [&](std::vector<unsigned char>&& v) {
+				data = std::move(v);
+				});
 			return err;
 		}
 
 		error_t write(void* buf, size_t size) {
 			error_t err;
-			err = codec_->encode((unsigned char*)buf, size, [&](void* buf, size_t len) {
+			err = codec_->encode((unsigned char*)buf, size, [&](std::vector<unsigned char>&& v) {
 				ssize_t nwrite = 0;
-				err = sock_->write(buf, size, &nwrite);	
-			});
+				err = sock_->write(v.data(), v.size(), &nwrite);
+				});
 			return err;
 		}
 
 		void onNewConnection(TcpConnectionHandler handler) {
-			LOG(TRACE) << "accept new client...";
+			//LOG(TRACE) << "accept new client...";
 			co_ = st::coroutine([this](TcpConnectionHandler handler) {
 				handler(this->shared_from_this());
-				LOG(TRACE) << "done";
-				svr_->removeConnecttion(this->shared_from_this());
-			},handler);
+				svr_->removeConnecttion(this->shared_from_this()); }, handler);
 		}
 
 	protected:
@@ -509,7 +505,7 @@ namespace st{
 	class TcpServer {
 	public:
 		friend TcpConnection<TcpServer>;
-		TcpServer(const char* host, int port):acceptor_(host,port) {}
+		TcpServer(const char* host, int port) :acceptor_(host, port) {}
 
 		error_t start() {
 			error_t err;
@@ -517,7 +513,7 @@ namespace st{
 			if (err) {
 				return error_trace(err);
 			}
-			co_ = st::coroutine(&TcpServer::run,this);
+			co_ = st::coroutine(&TcpServer::run, this);
 			idolco_ = st::coroutine(&TcpServer::idol, this);
 			return error_ok;
 		}
@@ -536,19 +532,18 @@ namespace st{
 	private:
 		void run() {
 			while (!exit_) {
-				auto nfd = acceptor_.do_accept(NULL,NULL);
+				auto nfd = acceptor_.do_accept(NULL, NULL);
 				if (nfd == nullptr) {
 					continue;
 				}
-				
+
 				auto sock = SocketPtr(new Socket());
 				auto err = sock->initialize(nfd);
 				if (err) {
 					LOG(ERROR) << err->what();
 					continue;
 				}
-
-				addConnection(TcpConnectionPtr(new TcpConnection<TcpServer>(sock, codec_,this)));
+				addConnection(TcpConnectionPtr(new TcpConnection<TcpServer>(sock, codec_, this)));
 			}
 		}
 
@@ -556,14 +551,14 @@ namespace st{
 		void idol() {
 			while (!exit_) {
 				clear_cond_.wait();
-				LOG(TRACE) << "release connection num:" << closed_cliconns_.size();
+				//LOG(TRACE) << "release connection num:" << closed_cliconns_.size();
 				closed_cliconns_.clear();
 			}
 		}
 	private:
 		void removeConnecttion(TcpConnectionPtr conn) {
 			closed_cliconns_.push_back(conn);
-			alive_cliconns_.erase(std::find(alive_cliconns_.begin(),alive_cliconns_.end(),conn));
+			alive_cliconns_.erase(std::find(alive_cliconns_.begin(), alive_cliconns_.end(), conn));
 			clear_cond_.notify_one();
 		}
 
@@ -575,7 +570,7 @@ namespace st{
 	private:
 		__detail::accpector acceptor_;
 		st::coroutine co_;					 //acceptЭ��
-		st::coroutine idolco_;				
+		st::coroutine idolco_;
 		bool exit_ = false;
 		IProtoCodec* codec_;
 		TcpConnectionHandler handler_;
