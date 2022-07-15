@@ -32,7 +32,7 @@ public:
 int main() {
 	signal(SIGINT, sig_handler);
 	st::enable_coroutine();
-	st::LogStream::setLogLevel(INFO);
+	st::LogStream::setLogLevel(TRACE);
 	int port = 33332;
 	st::TcpServer svr("0.0.0.0", port);
 	auto err = svr.start();
@@ -46,9 +46,14 @@ int main() {
 		LOG(INFO) << "accept new client...";
 		std::vector<unsigned char> recvbuf;
 		conn->read(recvbuf);
+		auto tt = st::GetCurrentTimeStamp();
+		LOG(INFO) << tt;
 		std::stringstream ss;
 		ss << "HTTP/1.1 200 OK" << "\r\n";
+		ss << "Content-Type: text/plain" << "\r\n";
+		ss << "Content-Length: " << tt.size() << "\r\n";
 		ss << "\r\n";
+		ss << tt;
 		conn->write((void*)ss.str().data(), ss.str().size());
 		});
 

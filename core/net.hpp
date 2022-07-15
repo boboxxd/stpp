@@ -8,7 +8,6 @@
 #include <arpa/inet.h>
 #include <string>
 #include "coroutine.hpp"
-#include "io.hpp"
 #include "error.hpp"
 #include "autofree.hpp"
 
@@ -466,6 +465,7 @@ namespace st {
 		TcpConnection(SocketPtr sock, IProtoCodec* codec, Server* svr) :sock_(sock), codec_(codec), svr_(svr) {}
 
 		~TcpConnection() {
+			LOG(TRACE) << "~TcpConnection";
 		}
 
 		error_t read(std::vector<unsigned char>& data) {
@@ -490,9 +490,13 @@ namespace st {
 
 		void onNewConnection(TcpConnectionHandler handler) {
 			//LOG(TRACE) << "accept new client...";
-			co_ = st::coroutine([this](TcpConnectionHandler handler) {
-				handler(this->shared_from_this());
-				svr_->removeConnecttion(this->shared_from_this()); }, handler);
+			co_ = st::coroutine(0,
+				[this](TcpConnectionHandler handler)
+				{
+					handler(this->shared_from_this());
+					svr_->removeConnecttion(this->shared_from_this());
+				},
+				handler);
 		}
 
 	protected:
@@ -513,14 +517,12 @@ namespace st {
 			if (err) {
 				return error_trace(err);
 			}
-			co_ = st::coroutine(&TcpServer::run, this);
-			idolco_ = st::coroutine(&TcpServer::idol, this);
+			co_ = st::coroutine(0, &TcpServer::run, this);
 			return error_ok;
 		}
 
 		void stop() {
 			exit_ = true;
-			clear_cond_.notify_all();
 			co_.terminate();
 		}
 
@@ -547,19 +549,9 @@ namespace st {
 			}
 		}
 
-		//clear connection
-		void idol() {
-			while (!exit_) {
-				clear_cond_.wait();
-				//LOG(TRACE) << "release connection num:" << closed_cliconns_.size();
-				closed_cliconns_.clear();
-			}
-		}
 	private:
 		void removeConnecttion(TcpConnectionPtr conn) {
-			closed_cliconns_.push_back(conn);
 			alive_cliconns_.erase(std::find(alive_cliconns_.begin(), alive_cliconns_.end(), conn));
-			clear_cond_.notify_one();
 		}
 
 		void addConnection(TcpConnectionPtr conn) {
@@ -575,7 +567,5 @@ namespace st {
 		IProtoCodec* codec_;
 		TcpConnectionHandler handler_;
 		std::vector<TcpConnectionPtr> alive_cliconns_; //client co
-		std::vector<TcpConnectionPtr> closed_cliconns_;
-		st::condition_variable clear_cond_;
 	};
 }

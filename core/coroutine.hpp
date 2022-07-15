@@ -8,13 +8,21 @@
 #include <tuple>
 #include <functional>
 #include "core/logging.hpp"
+#include "consts.hpp"
+#include "error.hpp"
 namespace st {
-	static bool enable_coroutine() {
+	static error_t enable_coroutine() {
+#ifdef __linux__
+		if (st_set_eventsys(ST_EVENTSYS_ALT) == -1) {
+			return error_new(ERROR_ST_SET_EPOLL, "st enable st failed, current is %s", st_get_eventsys_name());
+		}
+
+#endif
 		if (st_init() < 0) {
 			printf("error!");
-			return false;
+			return error_new(ERROR_ST_INITIALIZE, "st_init failed");
 		}
-		return true;
+		return error_ok;
 	}
 
 	class coroutine {
@@ -32,8 +40,8 @@ namespace st {
 		{
 			native_handle_type	_M_coroutine;
 		public:
-			id() noexcept : _M_coroutine(){ }
-			explicit id(native_handle_type handle) : _M_coroutine(handle){}
+			id() noexcept : _M_coroutine() { }
+			explicit id(native_handle_type handle) : _M_coroutine(handle) {}
 		private:
 			friend class coroutine;
 			friend class std::hash<coroutine::id>;
@@ -46,12 +54,12 @@ namespace st {
 			}
 
 			template<class _CharT, class _Traits>
-			friend std::basic_ostream<_CharT, _Traits>& operator<<(std::basic_ostream<_CharT, _Traits>& __out, coroutine::id __id) { __out << reinterpret_cast<long>(__id._M_coroutine); return __out;}
+			friend std::basic_ostream<_CharT, _Traits>& operator<<(std::basic_ostream<_CharT, _Traits>& __out, coroutine::id __id) { __out << reinterpret_cast<long>(__id._M_coroutine); return __out; }
 		};
 
 	private:
 		id				_M_id;
-
+		int _M_joinable;
 	public:
 		coroutine() noexcept = default;
 
@@ -72,22 +80,23 @@ namespace st {
 		}
 
 		template< typename _Callable, typename... _Args >
-		explicit coroutine(_Callable&& __f, _Args&&... __args) {
+		explicit coroutine(int joinable, _Callable&& __f, _Args&&... __args) {
 			// 启动线程
+			_M_joinable = joinable;
 			_M_start_coroutine(_S_make_state(__make_invoker(std::forward<_Callable>(__f), std::forward<_Args>(__args)...)));
 		}
 
 		~coroutine() {
-			if (_M_id._M_coroutine) {
+			if (_M_id._M_coroutine && _M_joinable == 1) {
 				void* res = NULL;
 				int r0 = st_thread_join(_M_id._M_coroutine, &res);
 				if (r0) {
 					// By st_thread_join
-					if (errno == EINVAL) {LOG(TRACE) << "1";assert(!r0);}
-					if (errno == EDEADLK) { LOG(TRACE) << "1"; assert(!r0);}
+					if (errno == EINVAL) { LOG(TRACE) << "1"; assert(!r0); }
+					if (errno == EDEADLK) { LOG(TRACE) << "1"; assert(!r0); }
 					// By st_cond_timedwait
-					if (errno == EINTR) { LOG(TRACE) << "1"; assert(!r0);}
-					if (errno == ETIME) { LOG(TRACE) << "1"; assert(!r0);}
+					if (errno == EINTR) { LOG(TRACE) << "1"; assert(!r0); }
+					if (errno == ETIME) { LOG(TRACE) << "1"; assert(!r0); }
 					// Others
 					assert(!r0);
 				}
@@ -108,7 +117,7 @@ namespace st {
 		}
 
 		void terminate() {
-			if(_M_id._M_coroutine)
+			if (_M_id._M_coroutine)
 				st_thread_interrupt(_M_id._M_coroutine);
 		}
 	private:
@@ -132,7 +141,7 @@ namespace st {
 
 		void _M_start_coroutine(_State_ptr state)
 		{
-			_M_id._M_coroutine = __gthread_coroutine(&execute_native_coroutine_routine, state.get(), true, 0);
+			_M_id._M_coroutine = __gthread_coroutine(&execute_native_coroutine_routine, state.get(), _M_joinable, 0);
 			if (_M_id._M_coroutine == nullptr)
 				throw std::runtime_error("__gthread_coroutine failed");
 			state.release();
@@ -160,7 +169,7 @@ namespace st {
 			_Tuple _M_t;
 
 			template<size_t _Index>
-			static std::tuple_element_t<_Index, _Tuple>&&_S_declval();
+			static std::tuple_element_t<_Index, _Tuple>&& _S_declval();
 
 			template<size_t... _Ind>
 			auto
@@ -255,7 +264,7 @@ namespace st {
 		native_handle handle_;
 	};
 
-	enum class cv_status { no_timeout, timeout, interrupted};
+	enum class cv_status { no_timeout, timeout, interrupted };
 
 	class condition_variable
 	{
@@ -327,7 +336,7 @@ namespace st {
 				_Predicate __p)
 		{
 			while (!__p())
-				if (wait_until( __atime) == cv_status::timeout)
+				if (wait_until(__atime) == cv_status::timeout)
 					return __p();
 			return true;
 		}
@@ -351,7 +360,7 @@ namespace st {
 			auto __reltime = std::chrono::duration_cast<__dur>(__rtime);
 			if (__reltime < __rtime)
 				++__reltime;
-			return wait_until( __clock_t::now() + __reltime, std::move(__p));
+			return wait_until(__clock_t::now() + __reltime, std::move(__p));
 		}
 
 		native_handle_type
@@ -369,11 +378,11 @@ namespace st {
 			if (re == -1) {
 				if (errno == ETIME)
 					return cv_status::timeout;
-				else if(errno == EINTR)
+				else if (errno == EINTR)
 					return cv_status::interrupted;
 			}
 
-            return cv_status::no_timeout;
+			return cv_status::no_timeout;
 		}
 	};
 }

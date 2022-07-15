@@ -80,9 +80,9 @@ namespace st {
 	private:
 		static int __log_level_limit;
 		int _level;
-	};
+		};
 
 	int LogStream::__log_level_limit = INFO;
-}
+	}
 
 #define LOG(level) st::LogStream(std::cout,level,__FILENAME__,__LINE__).ss
